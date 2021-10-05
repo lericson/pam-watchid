@@ -3,9 +3,8 @@ import LocalAuthentication
 // MARK: (Re)define PAM constants here so we don't need to import .h files.
 
 private let PAM_SUCCESS = CInt(0)
-private let PAM_AUTH_ERR = CInt(9)
+private let PAM_PERM_DENIED = CInt(7)
 private let PAM_IGNORE = CInt(25)
-private let PAM_SILENT = CInt(bitPattern: 0x80000000)
 private let DEFAULT_REASON = "perform an action that requires authentication"
 
 public typealias vchar = UnsafePointer<UnsafeMutablePointer<CChar>>
@@ -16,7 +15,7 @@ public typealias pam_handle_t = UnsafeRawPointer?
 @_cdecl("pam_sm_authenticate")
 public func pam_sm_authenticate(pamh: pam_handle_t, flags: CInt, argc: CInt, argv: vchar) -> CInt {
     let sudoArguments = ProcessInfo.processInfo.arguments
-    if sudoArguments.contains("-A") || sudoArguments.contains("--askpass") {
+    if sudoArguments[0] == "/usr/bin/sudo" && (sudoArguments.contains("-A") || sudoArguments.contains("--askpass")) {
         return PAM_IGNORE
     }
 
@@ -32,19 +31,22 @@ public func pam_sm_authenticate(pamh: pam_handle_t, flags: CInt, argc: CInt, arg
     }
 
     let semaphore = DispatchSemaphore(value: 0)
-    var result = PAM_AUTH_ERR
+    var result = PAM_IGNORE
     context.evaluatePolicy(policy, localizedReason: reason) { success, error in
         defer { semaphore.signal() }
 
         if let error = error {
-            if flags & PAM_SILENT == 0 {
-                fputs("\(error.localizedDescription)\n", stderr)
+            if error._domain == LAErrorDomain && (error._code == LAError.userCancel.rawValue || 
+                                                  error._code == LAError.authenticationFailed.rawValue ||
+                                                  error._code == LAError.userFallback.rawValue) {
+                result = PAM_PERM_DENIED
+            } else {
+                fputs("WatchID authentication error: \(error.localizedDescription)\n", stderr)
+                result = PAM_IGNORE
             }
-            result = PAM_IGNORE
-            return
+        } else {
+            result = success ? PAM_SUCCESS : PAM_PERM_DENIED
         }
-
-        result = success ? PAM_SUCCESS : PAM_AUTH_ERR
     }
 
     semaphore.wait()
