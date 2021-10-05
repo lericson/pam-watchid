@@ -14,4 +14,3 @@ install: $(LIBRARY_NAME)
 	if ! grep -q pam_watchid.so /etc/pam.d/*; then (echo '# Apple Watch authentication' && echo 'auth sufficient pam_watchid.so "reason=execute a command as root"' && cat /etc/pam.d/sudo) >/etc/pam.d/sudo.new && mv /etc/pam.d/sudo.new /etc/pam.d/sudo; fi
 
 .PHONY: install
-.DEFAULT: install
